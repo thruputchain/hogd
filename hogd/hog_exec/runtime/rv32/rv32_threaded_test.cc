@@ -7,6 +7,7 @@
 #include <optional>
 #include <random>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -2763,6 +2764,603 @@ TEST(Rv32ThreadedTrapGas, addressWraparoundTrapsLikeCanonical)
     const std::vector<uint32_t> words = {addi(1, 0, 1), load(2, 0, 1, -2)};
     expect_trap_gas_parity(words, Trap::kBadMemory,
                            /*expected_gas_remaining=*/98);
+  }
+}
+
+// --- Load/store runs: invariants for wider memory fusion ---------------------
+//
+// Only lw;sw and the ALU-adjacent load/store pairs fuse today. These tests use
+// long runs made almost entirely of loads and stores to pin what a wider
+// memory fusion (lw;lw, sw;sw, longer groups) must preserve:
+//
+//  - A fault charges every member through the faulting one and refunds the
+//    rest of the chunk, so the trap must name the faulting member, not the
+//    group head.
+//  - In a run entered in deficit, the fault is kBadMemory exactly when the
+//    prefix through the faulting member is affordable, and (kOutOfGas, 0)
+//    otherwise.
+//  - Members before the faulting one retire and members after it do not. On
+//    every non-OOG outcome, pc, halt state, registers, and memory match
+//    canonical, the same line fuzz_engine_diff.cc holds.
+//  - Bounds checks use run-time bases, including a value an earlier member of
+//    the same run loaded.
+//  - A branch can enter any member, and the charge starts there.
+//  - No group crosses a chunk break.
+//
+// Fault-terminated programs are also held to a closed form that depends on
+// neither engine: with P the gas charged through the fault, a budget of at
+// least P ends (kBadMemory, budget - P) and a smaller one ends
+// (kOutOfGas, 0). No assertion names a fused handler, so adding a fusion rule
+// should not require editing these tests.
+
+// Caps each memory-run program is lowered with: the production cap, and small
+// caps that move break carriers through the run.
+constexpr std::array<uint32_t, 6> kMemoryRunCaps = {kMinRunGasCap, 4, 5, 7, 11,
+                                                    kMaxRunGas};
+constexpr std::array<uint32_t, 1> kProductionCapOnly = {kMaxRunGas};
+
+struct MemoryRunProgram {
+  std::vector<uint32_t> words = {};
+  std::vector<uint8_t> image = {}; // initial data memory, placed at address 0
+  uint32_t memory_bytes = 256;
+  RecordingHost::OnEcall on_ecall = RecordingHost::OnEcall::kHaltWithA0;
+};
+
+// Gas for executing each of `words` once, from the canonical price table.
+uint64_t
+static_gas(std::span<const uint32_t> words)
+{
+  uint64_t gas = 0;
+  for (const uint32_t word : words) {
+    const DecodeResult decoded = decode_instruction(word);
+    EXPECT_TRUE(decoded.ok);
+    gas += decoded.instruction.gas_cost;
+  }
+  return gas;
+}
+
+std::vector<uint8_t>
+patterned_image(uint32_t bytes)
+{
+  std::vector<uint8_t> image(bytes);
+  for (uint32_t i = 0; i < bytes; ++i) {
+    image[i] = static_cast<uint8_t>((i * 37U) + 11U);
+  }
+  return image;
+}
+
+// A load or store whose base register the caller supplies, so a test can send
+// one member of a run out of bounds without changing its cost.
+struct MemOp {
+  bool is_store;
+  uint8_t funct3; // loads: 0 lb, 1 lh, 2 lw, 4 lbu, 5 lhu; stores: 0 sb,
+                  // 1 sh, 2 sw
+  uint8_t reg;    // load destination or store source
+  int16_t offset;
+};
+
+uint32_t
+encode_mem_op(const MemOp &m, uint8_t base)
+{
+  return m.is_store ? test_program::store(base, m.reg, m.offset, m.funct3)
+                    : test_program::load(m.reg, m.funct3, base, m.offset);
+}
+
+// One program, its canonical Machine, and every threaded lowering of it: each
+// cap, fused and unfused, untraced (the production handlers) and, unless
+// `traced` is false, traced.
+class MemoryRunHarness {
+public:
+  explicit MemoryRunHarness(MemoryRunProgram program,
+                            std::span<const uint32_t> caps = kMemoryRunCaps,
+                            bool traced = true)
+    : program_(std::move(program)), canonical_(make_program(program_.words))
+  {
+    const std::vector<uint8_t> code = words_to_bytes(program_.words);
+    for (const uint32_t cap : caps) {
+      for (const bool fuse : {true, false}) {
+        for (const bool trace : {false, true}) {
+          if (trace && !traced) {
+            continue;
+          }
+          auto pre =
+              ThreadedMachinePreInstantiation::create(code, program_.image,
+                                                      /*memory_start=*/0,
+                                                      program_.memory_bytes,
+                                                      trace, cap, fuse);
+          EXPECT_TRUE(pre.has_value()) << "cap " << cap;
+          if (pre.has_value()) {
+            lowerings_.push_back(Lowering{
+                .max_run_gas = cap,
+                .fuse = fuse,
+                .trace = trace,
+                .pre = std::make_shared<const ThreadedMachinePreInstantiation>(
+                    std::move(*pre))});
+          }
+        }
+      }
+    }
+  }
+
+  [[nodiscard]] bool ok() const
+  {
+    return canonical_ != nullptr && !lowerings_.empty();
+  }
+
+  // Canonical's outcome when the budget never binds.
+  struct Unbounded {
+    Trap trap;
+    uint64_t charge; // gas consumed
+  };
+  [[nodiscard]] Unbounded unbounded() const
+  {
+    Machine machine = canonical_machine(kAmpleGas);
+    RecordingHost host(program_.on_ecall);
+    (void)machine.run(host);
+    return Unbounded{.trap = machine.trap(),
+                     .charge = kAmpleGas - machine.gas_remaining()};
+  }
+
+  // The gas charged through the fault of a program whose unbounded run ends
+  // in kBadMemory.
+  [[nodiscard]] uint64_t fault_charge() const
+  {
+    const Unbounded run = unbounded();
+    EXPECT_EQ(run.trap, Trap::kBadMemory);
+    return run.charge;
+  }
+
+  // Hold every lowering to canonical at `budget`. Given `fault_charge`, the
+  // program is fault-terminated and canonical must also match the closed form.
+  void expect_at(uint64_t budget,
+                 std::optional<uint64_t> fault_charge = std::nullopt) const
+  {
+    Machine cmachine = canonical_machine(budget);
+    RecordingHost chost(program_.on_ecall);
+    const StepResult cresult = cmachine.run(chost);
+    if (fault_charge.has_value()) {
+      const bool affordable = budget >= *fault_charge;
+      EXPECT_EQ(cmachine.trap(),
+                affordable ? Trap::kBadMemory : Trap::kOutOfGas)
+          << "canonical, budget " << budget;
+      EXPECT_EQ(cmachine.gas_remaining(),
+                affordable ? budget - *fault_charge : 0)
+          << "canonical, budget " << budget;
+    }
+    for (const Lowering &lowering : lowerings_) {
+      ThreadedMachine tmachine(*lowering.pre, budget);
+      RecordingHost thost(program_.on_ecall);
+      TraceObserver observer;
+      const StepResult tresult =
+          lowering.trace ? tmachine.run(thost, observer) : tmachine.run(thost);
+      const std::string where = "budget " + std::to_string(budget) + ", cap " +
+                                std::to_string(lowering.max_run_gas) +
+                                (lowering.fuse ? ", fused" : ", unfused") +
+                                (lowering.trace ? ", traced" : ", untraced");
+      EXPECT_EQ(tresult, cresult) << where;
+      EXPECT_EQ(tmachine.trap(), cmachine.trap()) << where;
+      EXPECT_EQ(tmachine.gas_remaining(), cmachine.gas_remaining()) << where;
+      EXPECT_EQ(thost.call_count(), chost.call_count()) << where;
+      if (cmachine.trap() == Trap::kOutOfGas) {
+        continue; // an OOG frame may hold speculative state
+      }
+      EXPECT_EQ(tmachine.halted(), cmachine.halted()) << where;
+      EXPECT_EQ(tmachine.halt_code(), cmachine.halt_code()) << where;
+      EXPECT_EQ(tmachine.pc(), cmachine.pc()) << where;
+      for (size_t r = 1; r < kRegisterCount; ++r) {
+        EXPECT_EQ(tmachine.reg(r), cmachine.reg(r)) << where << ", x" << r;
+      }
+      EXPECT_TRUE(std::ranges::equal(tmachine.memory(), cmachine.memory()))
+          << where << ": memory differs";
+    }
+  }
+
+  // expect_at for every budget 0..max_budget, stopping after the first budget
+  // that fails.
+  void expect_sweep(uint64_t max_budget,
+                    std::optional<uint64_t> fault_charge = std::nullopt) const
+  {
+    for (uint64_t budget = 0; budget <= max_budget; ++budget) {
+      expect_at(budget, fault_charge);
+      if (::testing::Test::HasFailure()) {
+        return;
+      }
+    }
+  }
+
+  // Whether the fused and unfused production lowerings differ at any slot. A
+  // test meant to exercise fused handlers checks this, so it fails loudly if a
+  // rule change leaves its program unfused.
+  [[nodiscard]] bool fusion_engaged() const
+  {
+    const ThreadedMachinePreInstantiation *fused = nullptr;
+    const ThreadedMachinePreInstantiation *unfused = nullptr;
+    for (const Lowering &lowering : lowerings_) {
+      if (lowering.max_run_gas == kMaxRunGas && !lowering.trace) {
+        (lowering.fuse ? fused : unfused) = lowering.pre.get();
+      }
+    }
+    if (fused == nullptr || unfused == nullptr) {
+      return false;
+    }
+    for (size_t i = 0; i < program_.words.size(); ++i) {
+      if (ThreadedMachinePreInstantiationTestPeer::handler_at(*fused, i) !=
+          ThreadedMachinePreInstantiationTestPeer::handler_at(*unfused, i)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+private:
+  static constexpr uint64_t kAmpleGas = 1'000'000;
+
+  struct Lowering {
+    uint32_t max_run_gas;
+    bool fuse;
+    bool trace;
+    std::shared_ptr<const ThreadedMachinePreInstantiation> pre;
+  };
+
+  [[nodiscard]] Machine canonical_machine(uint64_t budget) const
+  {
+    Machine machine(canonical_, program_.memory_bytes, budget);
+    std::ranges::copy(program_.image, machine.memory().begin());
+    return machine;
+  }
+
+  MemoryRunProgram program_;
+  std::shared_ptr<const Program> canonical_;
+  std::vector<Lowering> lowerings_;
+};
+
+TEST(Rv32ThreadedMemoryRunGas, faultAtEveryPositionOfLoadStoreRunEveryBudget)
+{
+  // 24 loads and stores in one run, arranged so every adjacent grouping a
+  // memory fusion might take appears: lw;lw, sw;sw, lw;sw (fused today),
+  // three loads and three stores in a row, halfword and byte pairs, mixed
+  // store widths, and a load that reads an earlier store in the run. Each op
+  // in turn is sent out of bounds, and the program is swept over every budget
+  // up to past its whole cost under every lowering.
+  constexpr uint8_t kBase = 1;    // x1 = 64: every access in bounds
+  constexpr uint8_t kOobBase = 9; // x9 = 1024: every access out of bounds
+  const std::array<MemOp, 24> body = {{
+      {false, 2, 3, 0},  // lw x3, 0(b)
+      {false, 2, 4, 4},  // lw x4, 4(b)
+      {true, 2, 3, 32},  // sw x3, 32(b)
+      {true, 2, 4, 36},  // sw x4, 36(b)
+      {false, 2, 5, 8},  // lw x5, 8(b)
+      {true, 2, 5, 40},  // sw x5, 40(b)
+      {false, 1, 6, 12}, // lh x6, 12(b)
+      {false, 5, 7, 14}, // lhu x7, 14(b)
+      {true, 1, 6, 44},  // sh x6, 44(b)
+      {true, 1, 7, 46},  // sh x7, 46(b)
+      {false, 0, 3, 16}, // lb x3, 16(b)
+      {false, 4, 4, 17}, // lbu x4, 17(b)
+      {true, 0, 3, 48},  // sb x3, 48(b)
+      {true, 0, 4, 49},  // sb x4, 49(b)
+      {false, 2, 5, 20}, // lw x5, 20(b)
+      {false, 2, 6, 24}, // lw x6, 24(b)
+      {false, 2, 7, 28}, // lw x7, 28(b)
+      {true, 2, 5, 52},  // sw x5, 52(b)
+      {true, 2, 6, 56},  // sw x6, 56(b)
+      {true, 2, 7, 60},  // sw x7, 60(b)
+      {false, 2, 8, 32}, // lw x8, 32(b): reads the sw x3 above
+      {true, 2, 8, 64},  // sw x8, 64(b)
+      {true, 1, 8, 68},  // sh x8, 68(b)
+      {false, 2, 3, 36}, // lw x3, 36(b)
+  }};
+  constexpr size_t kSetup = 2;
+  const auto build = [&](std::optional<size_t> fault_at) {
+    MemoryRunProgram program{.image = patterned_image(256)};
+    program.words = {addi(kBase, 0, 64), addi(kOobBase, 0, 1024)};
+    for (size_t i = 0; i < body.size(); ++i) {
+      program.words.push_back(
+          encode_mem_op(body[i], i == fault_at ? kOobBase : kBase));
+    }
+    program.words.push_back(addi(10, 0, 0));
+    program.words.push_back(kEcallWord);
+    return program;
+  };
+
+  {
+    const MemoryRunProgram program = build(std::nullopt);
+    const MemoryRunHarness clean(program);
+    ASSERT_TRUE(clean.ok());
+    EXPECT_TRUE(clean.fusion_engaged());
+    const MemoryRunHarness::Unbounded run = clean.unbounded();
+    EXPECT_EQ(run.trap, Trap::kNone);
+    EXPECT_EQ(run.charge, static_gas(program.words));
+    clean.expect_sweep(run.charge + 3);
+  }
+  for (size_t k = 0; k < body.size(); ++k) {
+    SCOPED_TRACE("out-of-bounds body op " + std::to_string(k));
+    const MemoryRunProgram program = build(k);
+    const MemoryRunHarness harness(program);
+    ASSERT_TRUE(harness.ok());
+    // Charged: the setup and every op through the faulting one.
+    const uint64_t charge =
+        static_gas(std::span(program.words).first(kSetup + k + 1));
+    EXPECT_EQ(harness.fault_charge(), charge);
+    harness.expect_sweep(static_gas(program.words) + 3, charge);
+    if (HasFailure()) {
+      return;
+    }
+  }
+}
+
+TEST(Rv32ThreadedMemoryRunGas, faultsAroundProductionChunkSeamOfLongCopyRun)
+{
+  // 900 blocks of lw;lw;sw;sw;lw;sw (12 gas each) form one straight-line run
+  // of about 10.8k gas, which production lowering splits into two chunks.
+  // Faults go in a window around the seam (the break carrier, the chunk head
+  // after it, and ops on both sides) and on the run's last ops, where a budget
+  // just past the first chunk enters the second in a deficit near kMaxRunGas
+  // and the fault refunds almost nothing. Only the production (untraced)
+  // handlers run: a traced step copies all of memory, which is slow over runs
+  // this long, and the shorter tests cover traced break carriers at small caps.
+  constexpr uint8_t kSrc = 1; // x1 = 0
+  constexpr uint8_t kDst = 2; // x2 = 128
+  constexpr uint8_t kOob = 9; // x9 = 1024
+  constexpr size_t kBlocks = 900;
+  const std::array<MemOp, 6> block = {{
+      {false, 2, 3, 0}, // lw x3, 0(src)
+      {false, 2, 4, 4}, // lw x4, 4(src)
+      {true, 2, 3, 0},  // sw x3, 0(dst)
+      {true, 2, 4, 4},  // sw x4, 4(dst)
+      {false, 2, 5, 8}, // lw x5, 8(src)
+      {true, 2, 5, 8},  // sw x5, 8(dst)
+  }};
+  const auto build = [&](std::optional<size_t> fault_at) {
+    MemoryRunProgram program{.image = patterned_image(256)};
+    program.words = {addi(kSrc, 0, 0), addi(kDst, 0, 128), addi(kOob, 0, 1024)};
+    for (size_t b = 0; b < kBlocks; ++b) {
+      for (const MemOp &m : block) {
+        const bool faults = program.words.size() == fault_at;
+        program.words.push_back(
+            encode_mem_op(m, faults ? kOob : (m.is_store ? kDst : kSrc)));
+      }
+    }
+    program.words.push_back(addi(10, 0, 0));
+    program.words.push_back(kEcallWord);
+    return program;
+  };
+
+  const MemoryRunProgram clean_program = build(std::nullopt);
+  const std::span<const uint32_t> words(clean_program.words);
+  const size_t n = words.size();
+  // Lowering splits greedily from the tail: the last chunk is the longest
+  // suffix that fits kMaxRunGas, and the slot before it carries the break.
+  size_t seam = n;
+  uint64_t tail_gas = 0;
+  while (seam > 0 &&
+         tail_gas + static_gas(words.subspan(seam - 1, 1)) <= kMaxRunGas) {
+    tail_gas += static_gas(words.subspan(seam - 1, 1));
+    --seam;
+  }
+  const uint64_t head_gas = static_gas(words.first(seam));
+  const uint64_t total_gas = head_gas + tail_gas;
+  ASSERT_GT(seam, 3U + 8U);        // the seam window stays inside the body
+  ASSERT_LE(head_gas, kMaxRunGas); // exactly two chunks
+
+  {
+    const MemoryRunHarness clean(clean_program, kProductionCapOnly,
+                                 /*traced=*/false);
+    ASSERT_TRUE(clean.ok());
+    for (const uint64_t budget : {head_gas - 1, head_gas, head_gas + 1,
+                                  total_gas - 1, total_gas, total_gas + 1}) {
+      clean.expect_at(budget);
+    }
+  }
+
+  std::vector<size_t> fault_positions;
+  for (size_t k = seam - 8; k <= seam + 8; ++k) {
+    fault_positions.push_back(k);
+  }
+  for (size_t k = n - 6; k <= n - 3; ++k) { // n-2 and n-1 are addi;ecall
+    fault_positions.push_back(k);
+  }
+  for (const size_t k : fault_positions) {
+    SCOPED_TRACE("out-of-bounds op at slot " + std::to_string(k) +
+                 ", seam at slot " + std::to_string(seam));
+    const MemoryRunHarness harness(build(k), kProductionCapOnly,
+                                   /*traced=*/false);
+    ASSERT_TRUE(harness.ok());
+    const uint64_t charge = harness.fault_charge();
+    EXPECT_EQ(charge, static_gas(words.first(k + 1)));
+    // Budgets that run out in the first chunk, enter the second with the
+    // largest deficit or a middling one, and straddle the fault. Near the
+    // seam a run executes few ops, so sweep a dense window below the fault;
+    // deep in the run each budget re-executes thousands, so take only the
+    // boundary.
+    std::vector<uint64_t> budgets = {
+        0, 1, head_gas - 1, head_gas, head_gas + 1, (head_gas + charge) / 2};
+    const uint64_t window = k <= seam + 8 ? 40 : 2;
+    for (uint64_t budget = charge > window ? charge - window : 0;
+         budget <= charge + 2; ++budget) {
+      budgets.push_back(budget);
+    }
+    for (const uint64_t budget : budgets) {
+      harness.expect_at(budget, charge);
+    }
+    if (HasFailure()) {
+      return;
+    }
+  }
+}
+
+TEST(Rv32ThreadedMemoryRunGas, faultOnAddressLoadedEarlierInTheSameRun)
+{
+  using test_program::load;
+  using test_program::store;
+  // Memory holds the pointer chain 0 -> 16 -> 32 -> ... -> 112 -> 0x1000.
+  // Each program follows it with x5 = load(x5) inside one run, so the
+  // faulting address exists only after an earlier member of the run loaded
+  // it. A group that checked bounds against the base it saw on entry would
+  // miss the fault or take it early. Once x5 holds 0x1000, the next member
+  // that uses it as a base faults.
+  std::vector<uint8_t> image(256, 0);
+  for (uint32_t node = 0; node < 8; ++node) {
+    store_u32_le(image, node * 16U, node < 7 ? (node + 1) * 16U : 0x1000U);
+  }
+  const std::vector<std::vector<uint32_t>> patterns = {
+      // lw x5, 0(x5): a load whose base is the previous load's result.
+      {load(5, 2, 5, 0)},
+      // ... then sw x5, 4(x5): a store through the loaded pointer.
+      {load(5, 2, 5, 0), store(5, 5, 4, 2)},
+      // ... then lbu x6, 3(x5): a narrow load through it.
+      {load(5, 2, 5, 0), load(6, 4, 5, 3)},
+      // ... then lw x6, 4(x5); sw x6, 8(x5): the middle of three faults.
+      {load(5, 2, 5, 0), load(6, 2, 5, 4), store(5, 6, 8, 2)},
+  };
+  for (size_t p = 0; p < patterns.size(); ++p) {
+    SCOPED_TRACE("pattern " + std::to_string(p));
+    MemoryRunProgram program{.image = image};
+    program.words = {addi(5, 0, 0)};
+    for (int rep = 0; rep < 9; ++rep) {
+      program.words.insert(program.words.end(), patterns[p].begin(),
+                           patterns[p].end());
+    }
+    program.words.push_back(addi(10, 0, 0));
+    program.words.push_back(kEcallWord);
+    const MemoryRunHarness harness(program);
+    ASSERT_TRUE(harness.ok());
+    harness.expect_sweep(static_gas(program.words) + 3, harness.fault_charge());
+    if (HasFailure()) {
+      return;
+    }
+  }
+}
+
+TEST(Rv32ThreadedMemoryRunGas, copyLoopOverrunAfterEnteringMidGroup)
+{
+  using test_program::j_type;
+  using test_program::load;
+  using test_program::store;
+  // A copy loop: lw;lw;sw;sw, two pointer bumps, and a jal back. Each pass is
+  // one run entered at the loop head, a branch target. The first pass is
+  // entered by a jal into each of the first four members in turn, so some
+  // pass starts partway into a group whatever pairs fusion takes. The loop
+  // runs until a pointer leaves memory: the destination (the first sw
+  // faults) or the source (the second lw faults, the first is in bounds).
+  struct Overrun {
+    const char *pointer;
+    int32_t src;
+    int32_t dst;
+  };
+  const std::array<Overrun, 2> overruns = {{
+      {"destination", 0, 200}, // eighth pass: sw x3, 0(x2) at x2 = 256
+      {"source", 220, 0},      // fifth pass: lw x4, 4(x1) at x1 = 252
+  }};
+  for (const Overrun &overrun : overruns) {
+    for (int32_t entry = 0; entry < 4; ++entry) {
+      SCOPED_TRACE(std::string(overrun.pointer) + " overrun, first pass " +
+                   "enters loop member " + std::to_string(entry));
+      MemoryRunProgram program{.image = patterned_image(256)};
+      program.words = {
+          addi(1, 0, overrun.src),
+          addi(2, 0, overrun.dst),
+          j_type(0, 4 * (1 + entry)), // jal x0, loop + 4 * entry
+          load(3, 2, 1, 0),           // loop: lw x3, 0(x1)
+          load(4, 2, 1, 4),           // lw x4, 4(x1)
+          store(2, 3, 0, 2),          // sw x3, 0(x2)
+          store(2, 4, 4, 2),          // sw x4, 4(x2)
+          addi(1, 1, 8),              // x1 += 8
+          addi(2, 2, 8),              // x2 += 8
+          j_type(0, -24),             // jal x0, loop
+      };
+      const MemoryRunHarness harness(program);
+      ASSERT_TRUE(harness.ok());
+      // A pass is one run, so the budgets past the fault that still enter
+      // its run in deficit end within one pass's gas.
+      const uint64_t charge = harness.fault_charge();
+      harness.expect_sweep(charge + static_gas(program.words), charge);
+      if (HasFailure()) {
+        return;
+      }
+    }
+  }
+}
+
+TEST(Rv32ThreadedMemoryRunGas, randomLoadStoreRunsMatchCanonicalAtEveryBudget)
+{
+  using test_program::branch;
+  using test_program::load;
+  using test_program::store;
+  // Seeded programs that are mostly loads and stores. Bases are in bounds,
+  // straddle the end of memory, are far out of bounds, or hold values loaded
+  // earlier (small for byte loads, mostly out of bounds for wider ones).
+  // Programs halt, hit ebreak, fall off the end, or pass an ecall that
+  // resumes into more memory ops. Every lowering must match canonical at
+  // every budget up to past the unbounded run.
+  std::mt19937_64 rng(0x6d656d72756eULL); // "memrun"
+  const auto pick = [&](uint32_t n) {
+    return static_cast<uint32_t>(rng() % n);
+  };
+  const auto reg = [&](uint32_t first, uint32_t count) {
+    return static_cast<uint8_t>(first + pick(count));
+  };
+  const auto mem_op = [&] {
+    constexpr std::array<uint8_t, 9> kBases = {1, 1, 1, 2, 9, 3, 4, 5, 6};
+    constexpr std::array<uint8_t, 5> kLoads = {0, 1, 2, 4, 5};
+    constexpr std::array<uint8_t, 3> kStores = {0, 1, 2};
+    const uint8_t base = kBases[pick(kBases.size())];
+    const auto offset = static_cast<int32_t>(pick(16));
+    return pick(2) == 0
+               ? load(reg(3, 4), kLoads[pick(kLoads.size())], base, offset)
+               : store(base, reg(3, 4), offset, kStores[pick(kStores.size())]);
+  };
+  for (int index = 0; index < 120; ++index) {
+    MemoryRunProgram program{.image = std::vector<uint8_t>(256)};
+    for (uint8_t &byte : program.image) {
+      byte = static_cast<uint8_t>(pick(64));
+    }
+    program.words = {
+        addi(1, 0, static_cast<int32_t>(pick(128))),     // x1: in bounds
+        addi(2, 0, static_cast<int32_t>(255 - pick(4))), // x2: straddles end
+        addi(9, 0, 1024),                                // x9: out of bounds
+    };
+    const uint32_t body = 8 + pick(33);
+    for (uint32_t i = 0; i < body; ++i) {
+      switch (pick(20)) {
+      case 0: // pointer bump
+        program.words.push_back(
+            addi(reg(3, 4), reg(1, 6), static_cast<int32_t>(pick(32))));
+        break;
+      case 1: // short forward bne, possibly past the end
+        program.words.push_back(
+            branch(1, reg(3, 4), 0, 4 * static_cast<int32_t>(1 + pick(3))));
+        break;
+      default:
+        program.words.push_back(mem_op());
+        break;
+      }
+    }
+    switch (pick(4)) {
+    case 0:
+      program.words.push_back(addi(10, 0, 0));
+      program.words.push_back(kEcallWord);
+      break;
+    case 1:
+      program.words.push_back(kEbreakWord);
+      break;
+    case 2:
+      break; // falls off the end
+    default:
+      program.on_ecall = RecordingHost::OnEcall::kContinue;
+      program.words.push_back(kEcallWord);
+      program.words.push_back(mem_op());
+      program.words.push_back(mem_op());
+      program.words.push_back(kEbreakWord);
+      break;
+    }
+    SCOPED_TRACE("program " + std::to_string(index));
+    const MemoryRunHarness harness(program);
+    ASSERT_TRUE(harness.ok());
+    harness.expect_sweep(harness.unbounded().charge + 3);
+    if (HasFailure()) {
+      return;
+    }
   }
 }
 
