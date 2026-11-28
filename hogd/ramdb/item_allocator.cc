@@ -118,8 +118,13 @@ ItemAllocator::compact(float utilization_thresh)
 
     for (auto &ll : claimed) {
       in_flight.push_back(std::make_shared<UniqueLoglet>(std::move(ll)));
-      completions.emplace_back(pool_.submit(
-          [this, l = in_flight.back()] { return compact_one(std::move(*l)); }));
+      completions.emplace_back(pool_.submit([this, l = in_flight.back()] {
+        CompactionStats s = compact_one(std::move(*l));
+        // Free the source now; later loglets compact into its memory
+        // (#4891). in_flight shares ownership, so dropping `l` would not.
+        (*l).reset();
+        return s;
+      }));
     }
 
     // wait for the compactions to finish.
@@ -222,7 +227,7 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
           // then the new live header, and cloning src_item over it would
           // clobber the live value with stale bytes. src_item is already
           // dead, so skip it; its memory is reclaimed when this source
-          // loglet is freed at the end of the pass.
+          // loglet is freed once compact_one returns.
           if (*hptr != src_item)
             return;
 

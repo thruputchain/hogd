@@ -211,8 +211,9 @@ LogletAllocator::alloc(LogletMode mode, bool use_reserved)
       return nullptr;
   }
 
-  // allocate a free loglet.
-  assert(!free_loglets_.empty());
+  // allocate a free loglet. Only the reserved path can find none; stop in
+  // every build type rather than pop an empty vector (#4891).
+  CHECK(!free_loglets_.empty());
   Loglet *ll = free_loglets_.back();
   free_loglets_.pop_back();
   if constexpr (is_debug_build())

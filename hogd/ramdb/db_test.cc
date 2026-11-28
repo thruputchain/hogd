@@ -42,6 +42,7 @@
 #include "hogd/ramdb/item_allocator.h"
 #include "hogd/ramdb/loglet.h"
 #include "hogd/ramdb/scalable_map.h"
+#include "x23/tests/death_test.h"
 
 namespace hogd {
 
@@ -86,10 +87,13 @@ struct MapStack {
   DiskWriter dw;
   ScalableMap map;
 
-  MapStack(Directory d, size_t heap, int mutex_order, int bucket_order)
+  // compaction_threads sizes both the worker pool and the loglet reserve, as
+  // Database does with available_parallelism().
+  MapStack(Directory d, size_t heap, int mutex_order, int bucket_order,
+           size_t compaction_threads = kCompactionThreads)
     : dir(std::move(d)),
-      la(LogletAllocator::create(heap, kCompactionThreads, [] {})),
-      pool(static_cast<int>(kCompactionThreads)), ia(*la, pool, &map),
+      la(LogletAllocator::create(heap, compaction_threads, [] {})),
+      pool(static_cast<int>(compaction_threads)), ia(*la, pool, &map),
       dw(*la, dir, 0, [] {}), map(ia, dw, mutex_order, bucket_order)
   {}
 };
@@ -102,6 +106,89 @@ make_value(uint64_t seed, size_t len)
     v[i] = static_cast<char>(((seed * 1103515245U) + (i * 12345U)) & 0xFFU);
   return v;
 }
+
+// CompactionUnderPressure builds the state a compaction pass sees under memory
+// pressure: half-dead compactable loglets and nothing free beyond the reserve.
+class CompactionUnderPressure {
+public:
+  // Sources that are half live hold four loglets' worth of live data, more
+  // than the reserve for the thread counts used here.
+  static constexpr size_t kSourceLoglets = 8;
+  static constexpr size_t kHeapLoglets = 24;
+  static constexpr size_t kValueLen = 1400;
+
+  CompactionUnderPressure(Directory d, size_t threads)
+    : threads_(threads),
+      s_(std::move(d), kHeapLoglets * kLogletRegionSize, /*mutex_order=*/6,
+         /*bucket_order=*/12, threads)
+  {}
+
+  MapStack &stack() { return s_; }
+  size_t free_loglets() const { return s_.la->usage_stats().free; }
+
+  // fill inserts items until kSourceLoglets loglets are full, removes every
+  // other one, and then takes every loglet that an ordinary allocation can
+  // get, leaving exactly the reserve free.
+  void fill()
+  {
+    using enum ItemStorage;
+    const size_t before = free_loglets();
+    std::vector<std::string> keys;
+    // The thread's head loglet is not compactable, so fill one more.
+    for (uint64_t i = 0; before - free_loglets() < kSourceLoglets + 1; ++i) {
+      std::string key = std::format("key-{:08}", i);
+      std::string val = make_value(i, kValueLen);
+      ASSERT_NO_FATAL_FAILURE(apply(kNormal, key, val));
+      oracle_.emplace(key, std::move(val));
+      keys.push_back(std::move(key));
+    }
+    for (size_t i = 0; i < keys.size(); i += 2) {
+      ASSERT_NO_FATAL_FAILURE(apply(kTombstone, keys[i], {}));
+      oracle_.erase(keys[i]);
+    }
+
+    // An ordinary allocation waits unless a loglet beyond the reserve is free.
+    while (free_loglets() > threads_) {
+      ballast_.push_back(make_unique_loglet(*s_.la, LogletMode::kMemoryItems));
+      ASSERT_TRUE(static_cast<bool>(ballast_.back()));
+    }
+  }
+
+  // check_contents expects the map to hold exactly the live items.
+  void check_contents()
+  {
+    std::unordered_map<std::string, std::string> found;
+    s_.map.for_each([&](ItemHeader *h) {
+      auto [it, inserted] =
+          found.emplace(to_string(h->get_key()), to_string(h->get_value()));
+      EXPECT_TRUE(inserted) << "duplicate key in map";
+    });
+    EXPECT_EQ(found, oracle_);
+  }
+
+private:
+  size_t threads_;
+  MapStack s_;
+  std::vector<UniqueLoglet> ballast_;
+  std::unordered_map<std::string, std::string> oracle_;
+  uint64_t lsn_{0};
+
+  void apply(ItemStorage storage, const std::string &key,
+             const std::string &val)
+  {
+    // A WAL-style record for apply_change, which copies it into the map.
+    alignas(ItemHeader) std::array<std::byte, 2048> buf;
+    ASSERT_LE(sizeof(ItemHeader) + key.size() + val.size(), buf.size());
+    auto *rec = new (buf.data())
+        ItemHeader(storage, /*type=*/0, static_cast<uint16_t>(key.size()),
+                   static_cast<uint32_t>(val.size()));
+    ASSERT_NE(rec, nullptr);
+    std::ranges::copy(std::as_bytes(std::span(key)), rec->get_key().begin());
+    std::ranges::copy(std::as_bytes(std::span(val)), rec->get_value().begin());
+    rec->lsn = ++lsn_;
+    ASSERT_TRUE(static_cast<bool>(s_.map.apply_change(rec)));
+  }
+};
 
 // Rewrites the LSN in a snapshot's trailing commit record to new_lsn and
 // recomputes the same unkeyed CRC32C recovery verifies, so only the LSN is out
@@ -1635,6 +1722,48 @@ TEST(ScalableMapRecoveryConcurrency, PrepareExpandWaitsForBucketHolders)
 
   holder.join();
   resizer.join();
+}
+
+// A pass must fit in the reserved loglets when nothing else is free, whatever
+// the host's core count; workers free their sources as they go (#4891).
+class CompactionReserveTest : public testing::TestWithParam<size_t> {};
+
+TEST_P(CompactionReserveTest, PassFitsInReservedLoglets)
+{
+  const size_t threads = GetParam();
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(static_cast<bool>(dir));
+  CompactionUnderPressure p(*dir, threads);
+  ASSERT_NO_FATAL_FAILURE(p.fill());
+  ASSERT_EQ(p.free_loglets(), threads);
+
+  // Half of each source is dead, so the pass must give loglets back.
+  EXPECT_GT(p.stack().ia.compact(1.0F), 0U);
+  EXPECT_GT(p.free_loglets(), threads);
+  p.check_contents();
+
+  // A second pass starts with partly filled destinations and nothing to
+  // reclaim; it must fit as well.
+  p.stack().ia.compact(1.0F);
+  p.check_contents();
+}
+
+INSTANTIATE_TEST_SUITE_P(Threads, CompactionReserveTest,
+                         testing::Values(1, 2, 3));
+
+// The reserved path does not wait, so with an empty free list it must stop
+// rather than pop the list, in Release builds too (#4891).
+TEST(LogletDeathTest, ReservedAllocStopsWhenEmpty)
+{
+  auto allocator = LogletAllocator::create(2 * kLogletRegionSize, 1, [] {});
+  ASSERT_NE(allocator, nullptr);
+  UniqueLoglet a = make_unique_loglet(*allocator, LogletMode::kMemoryItems);
+  ASSERT_TRUE(static_cast<bool>(a));
+  UniqueLoglet b =
+      make_unique_loglet(*allocator, LogletMode::kMemoryItems, true);
+  ASSERT_TRUE(static_cast<bool>(b));
+  X23_EXPECT_DEATH(allocator->alloc(LogletMode::kMemoryItems, true),
+                   "CHECK FAILED");
 }
 
 TEST(Loglet, CloneZeroesNextSlot)
