@@ -7,12 +7,14 @@
 #include <cstring>
 #include <expected>
 #include <fcntl.h>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <sys/fcntl.h>
+#include <sys/types.h>
 #include <utility>
 #include <vector>
 
@@ -115,6 +117,11 @@ public:
     // Bytes in the close-time residual write; earlier buffer flushes are
     // not counted (the old "total bytes at end" value).
     std::optional<size_t> residual_bytes;
+    uint64_t payload_bytes = 0;
+    size_t writeback_count = 0;
+    uint64_t writeback_bytes = 0;
+    uint64_t writeback_ns = 0;
+    bool writeback_unsupported = false;
     std::optional<std::int64_t> sync_ns;
     std::optional<std::int64_t> publish_ns;
     std::optional<double> wait_executors_closed_s;
@@ -123,6 +130,17 @@ public:
     std::optional<double> close_total_s;
     std::optional<std::int64_t> close_total_ns;
   } log_stats;
+
+#ifdef __linux__
+  // Test-only syscall replacement. Install before opening executor handles.
+  // Return zero on success, otherwise an errno value.
+  void
+  set_stream_writeback_test_hook(std::function<int(int, off_t, off_t)> hook)
+  {
+    writeback_enabled_ = true;
+    writeback_test_hook_ = std::move(hook);
+  }
+#endif
 
   static void warn_slow_phase(std::string_view phase, BlockID block_id,
                               std::int64_t elapsed_ns);
@@ -321,6 +339,15 @@ private:
   x23::CoroFutex<bool> all_executors_closed_ = false;
 
   x23::UniqueFd events_file_;
+  // Protected by lock_. Never substitutes for final file fsync.
+  uint64_t streamed_bytes_ = 0;
+#ifdef __linux__
+  static bool stream_writeback_enabled();
+  bool writeback_enabled_ = stream_writeback_enabled();
+  uint64_t hinted_bytes_ = 0;
+  bool writeback_active_ = false;
+  std::function<int(int, off_t, off_t)> writeback_test_hook_;
+#endif
   BlockHeight block_height_ = -1;
   SHA256Hash root_hash_{};
   bool has_root_hash_ = false;

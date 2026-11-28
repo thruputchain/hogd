@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <fcntl.h>
 #include <filesystem>
 #include <latch>
 #include <span>
@@ -22,11 +24,13 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/init.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/fileio.h"
 #include "x23/serialize.h"
+#include "x23/tests/death_test.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 
@@ -620,3 +624,184 @@ main(int argc, char *argv[])
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+
+// Test the stream-writeback path with an actual payload above the threshold.
+// Large transaction bodies keep the event-trie memory small even in Debug.
+#ifdef __linux__
+namespace hogd {
+namespace {
+void
+add_writeback_test_payload(EventBlockContext &context)
+{
+  for (uint64_t i = 0; i < 140; ++i) {
+    ProposedTransaction body{};
+    body.signed_tx.tx.invocation.calldata.resize(256 * 1024, 0x5a);
+    body.signed_tx.tx.uniquifier.nonce = i;
+    TxEventLog event{};
+    event.tx_hash = sha256(body.signed_tx.tx);
+    EXPECT_TRUE(context.add_event(std::move(event), std::move(body))());
+  }
+}
+} // namespace
+
+TEST_F(EventBlockContextTest, StreamWritebackUnsupportedStillDurablyCloses)
+{
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
+  context.set_stream_writeback_test_hook([](int, auto start, auto length) {
+    EXPECT_EQ(start, 0);
+    EXPECT_GE(length, 32 * 1024 * 1024);
+    return EOPNOTSUPP;
+  });
+  context.executor_open_block();
+  add_writeback_test_payload(context);
+  context.executor_close_block();
+  finish_file(context);
+  const auto hash = context.get_root_hash();
+  EXPECT_EQ(context.log_stats.writeback_count, 1);
+  EXPECT_TRUE(context.log_stats.writeback_unsupported);
+  EXPECT_EQ(context.log_stats.writeback_bytes, 0);
+  EXPECT_GT(context.log_stats.payload_bytes, 32U * 1024 * 1024);
+  auto path = EventBlockContext::final_events_filename(temp_dir_, hash);
+  EXPECT_EQ(std::filesystem::file_size(path), context.log_stats.payload_bytes);
+  auto recovered = read_final_events_file(temp_dir_, hash);
+  ASSERT_TRUE(recovered.has_value());
+  ASSERT_EQ(recovered->tx_bodies.size(), 140);
+  ASSERT_EQ(recovered->event_logs.size(), 140);
+  std::vector<bool> seen(140);
+  for (size_t i = 0; i < recovered->tx_bodies.size(); ++i) {
+    const auto &body = recovered->tx_bodies[i];
+    const auto id = body.signed_tx.tx.uniquifier.nonce;
+    ASSERT_LT(id, seen.size());
+    EXPECT_FALSE(seen[id]);
+    seen[id] = true;
+    EXPECT_EQ(recovered->event_logs[i].tx_hash, sha256(body.signed_tx.tx));
+    EXPECT_EQ(body.signed_tx.tx.invocation.calldata.size(), 256U * 1024);
+  }
+}
+
+TEST_F(EventBlockContextTest, StreamWritebackRetriesInterruptedHint)
+{
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
+  int calls = 0;
+  context.set_stream_writeback_test_hook(
+      [&](int, auto, auto) { return ++calls == 1 ? EINTR : 0; });
+  context.executor_open_block();
+  add_writeback_test_payload(context);
+  context.executor_close_block();
+  finish_file(context);
+  EXPECT_EQ(calls, 2);
+  EXPECT_EQ(context.log_stats.writeback_count, 1);
+  EXPECT_FALSE(context.log_stats.writeback_unsupported);
+  EXPECT_GT(context.log_stats.writeback_bytes, 0U);
+  EXPECT_TRUE(
+      read_final_events_file(temp_dir_, context.get_root_hash()).has_value());
+}
+
+TEST_F(EventBlockContextTest, OptionalStreamWritebackErrorsFallBack)
+{
+  // All optional failures leave the mandatory final file+directory sync.
+  const int errors[] = {
+      ENOSYS, EINVAL, ESPIPE, EPERM, EACCES, ENOMEM, EAGAIN, EINTR,
+  };
+  BlockID id = 1;
+  for (int err : errors) {
+    EventBlockContext context(temp_dir_, id,
+                              EventBlockContext::create_events_file(temp_dir_,
+                                                                    id));
+    ++id;
+    int calls = 0;
+    context.set_stream_writeback_test_hook([&](int, auto, auto) {
+      ++calls;
+      return err;
+    });
+    context.executor_open_block();
+    add_writeback_test_payload(context);
+    context.executor_close_block();
+    finish_file(context);
+    EXPECT_EQ(calls, err == EINTR ? 3 : 1);
+    EXPECT_TRUE(context.log_stats.writeback_unsupported);
+    EXPECT_EQ(context.log_stats.writeback_count, 1U);
+    EXPECT_EQ(context.log_stats.writeback_bytes, 0U);
+    auto root = context.get_root_hash();
+    auto file = EventBlockContext::final_events_filename(temp_dir_, root);
+    EXPECT_TRUE(read_final_events_file(temp_dir_, root).has_value());
+    EXPECT_EQ(std::filesystem::file_size(file),
+              context.log_stats.payload_bytes);
+    // Direct contexts do not use the RPC layer's shared-name reference count;
+    // this iteration has no other live holder, so clean its published file.
+    std::filesystem::remove(file);
+  }
+}
+
+using EventBlockContextDeathTest = EventBlockContextTest;
+
+TEST_F(EventBlockContextDeathTest, StreamWritebackIOErrorFailsStop)
+{
+  X23_EXPECT_DEATH(
+      {
+        EventBlockContext context(
+            temp_dir_, 1, EventBlockContext::create_events_file(temp_dir_, 1));
+        context.set_stream_writeback_test_hook(
+            [](int, auto, auto) { return EIO; });
+        context.executor_open_block();
+        add_writeback_test_payload(context);
+        context.executor_close_block();
+        finish_file(context);
+      },
+      "failed to initiate event file writeback");
+}
+
+TEST_F(EventBlockContextDeathTest, StreamWritebackNoSpaceFailsStop)
+{
+  X23_EXPECT_DEATH(
+      {
+        EventBlockContext context(
+            temp_dir_, 1, EventBlockContext::create_events_file(temp_dir_, 1));
+        context.set_stream_writeback_test_hook(
+            [](int, auto, auto) { return ENOSPC; });
+        context.executor_open_block();
+        add_writeback_test_payload(context);
+        context.executor_close_block();
+        finish_file(context);
+      },
+      "failed to initiate event file writeback");
+}
+
+TEST_F(EventBlockContextTest, AbandonWaitsForOutstandingStreamWriteback)
+{
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
+  std::latch entered(1), release(1), finished(1);
+  context.set_stream_writeback_test_hook([&](int fd, auto, auto) {
+    entered.count_down();
+    release.wait();
+    EXPECT_GE(fcntl(fd, F_GETFD), 0);
+    return 0;
+  });
+  context.executor_open_block();
+  // Even with one pool worker blocked in the hook, the test thread must be
+  // free to request abandonment and release it. The producer can be waiting
+  // for an append-lock continuation on that same worker.
+  std::thread producer([&] { add_writeback_test_payload(context); });
+  entered.wait();
+  auto abandoned = context.await_abandon();
+  // The coroutine starts eagerly and cannot finish until its pending range
+  // writeback leaves the fd-pinning pending write count.
+  abandoned([&finished] { finished.count_down(); });
+  EXPECT_FALSE(finished.try_wait());
+  release.count_down();
+  finished.wait();
+  producer.join();
+  EXPECT_EQ(context.log_stats.writeback_count, 1);
+  EXPECT_GT(context.log_stats.writeback_bytes, 0U);
+  context.delete_events_file();
+  EXPECT_FALSE(std::filesystem::exists(
+      EventBlockContext::temp_events_filename(temp_dir_, 1)));
+}
+} // namespace hogd
+#endif

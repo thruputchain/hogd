@@ -107,6 +107,7 @@ declare -a CONTROL_LOG_RECORDS=()
 declare -a LIVE_TAIL_PIDS=()
 PUBLISHED_RESULTS=0
 COORDINATOR_OUTPUT_WRITTEN=0
+RESULTS_STATUS=0
 
 record_control_logs() {
   local host=$1
@@ -254,19 +255,34 @@ write_coordinator_output() {
   node0_stdout=$(get_record_stdout_path node0_chuckd) || return 1
   node1_stdout=$(get_record_stdout_path node1_chuckd) || return 1
 
-  tmp_node0=$(mktemp)
-  tmp_node1=$(mktemp)
-  copy_remote_file "${CHUCKD_HOSTS[0]}" "$node0_stdout" "$tmp_node0"
-  copy_remote_file "${CHUCKD_HOSTS[1]}" "$node1_stdout" "$tmp_node1"
+  tmp_node0=$(mktemp) || return 1
+  if ! tmp_node1=$(mktemp); then
+    rm -f "$tmp_node0"
+    return 1
+  fi
+  if ! copy_remote_file "${CHUCKD_HOSTS[0]}" "$node0_stdout" "$tmp_node0" ||
+    ! copy_remote_file "${CHUCKD_HOSTS[1]}" "$node1_stdout" "$tmp_node1"; then
+    rm -f "$tmp_node0" "$tmp_node1"
+    return 1
+  fi
+  local results_status=0
+  "$SCRIPT_DIR/validate_multi_node_coordinator_output.sh" "$tmp_node0" "$tmp_node1" || results_status=$?
   echo "writing both outputs to $REPO_ROOT/coordinator_output.txt"
-  cat "$tmp_node0" "$tmp_node1" >"$REPO_ROOT/coordinator_output.txt"
+  if ! cat "$tmp_node0" "$tmp_node1" >"$REPO_ROOT/coordinator_output.txt"; then
+    echo "failed to write coordinator output" >&2
+    rm -f "$tmp_node0" "$tmp_node1"
+    return 1
+  fi
   rm -f "$tmp_node0" "$tmp_node1"
+  if [[ $results_status -ne 0 ]]; then
+    return "$results_status"
+  fi
   COORDINATOR_OUTPUT_WRITTEN=1
 }
 
 publish_results() {
   if [[ $PUBLISHED_RESULTS -eq 1 ]]; then
-    return 0
+    return "$RESULTS_STATUS"
   fi
 
   if [[ ${#CONTROL_LOG_RECORDS[@]} -eq 0 ]]; then
@@ -284,7 +300,8 @@ publish_results() {
     echo 'log integration metrics'
     "$REPO_ROOT/scripts/log_metric.sh" nightly_integration_mempool_multi_node "$REPO_ROOT/coordinator_output.txt"
   else
-    echo 'failed to collect coordinator output; skipping summary metric file' >&2
+    echo 'failed to collect usable coordinator output; skipping summary metric file' >&2
+    RESULTS_STATUS=1
   fi
 
   if [[ ${MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS:-0} -eq 0 ]]; then
@@ -294,6 +311,7 @@ publish_results() {
     echo 'skipping metrics history commit'
   fi
   PUBLISHED_RESULTS=1
+  return "$RESULTS_STATUS"
 }
 
 kill_stale_processes() {
@@ -444,10 +462,18 @@ for node in "${NODE_IDS[@]}"; do
 done
 
 echo 'launch event and auth'
+# Ordinary container multi-node Event streams large candidates to disk. Start
+# writeback during streaming, without changing the final durable close.
+# Other stages, native launches and non-container consumers retain defaults.
+event_command=("$EVENT_BINARY")
+if [[ ${HOGD_CI_CONTAINER:-0} == 1 && ${HOGD_CI_OFFLINE:-0} == 1 &&
+  ${WORK_ROOT%/} == /workspace/ci_work_dir ]]; then
+  event_command=(env HOGD_EVENT_STREAM_WRITEBACK=1 "$EVENT_BINARY")
+fi
 for node in "${NODE_IDS[@]}"; do
   event_host="${EVENT_HOSTS[$node]}"
   control_start_with_ulimit "$event_host" "node${node}_event" "$SLOT_A_CPUS" \
-    "$EVENT_BINARY" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EVENT_PORT" --bind-ip "$(hog_ip "$event_host")" \
+    "${event_command[@]}" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EVENT_PORT" --bind-ip "$(hog_ip "$event_host")" \
     --work-dir "$(node_dir "$node")/event" --executor-port "$EVENT_EXECUTOR_PORT" --mempool-port "$EVENT_MEMPOOL_PORT" --indexer-port "$EVENT_INDEXER_PORT" --metrics-port "$EVENT_HTTP_PORT"
 
   control_start_with_ulimit "${AUTH_HOSTS[$node]}" "node${node}_auth" "$SLOT_B_CPUS" \
