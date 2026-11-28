@@ -1274,7 +1274,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
           co_await scheduler_guard(scheduler_->global_lock_);
           co_await scheduler_->abandon_pending_nomination(cache.block_id);
         }
-        cache.block_id = 0;
+        cache.clear_nomination();
         co_return;
       });
   const x23::DagCleanup nomination_cleanup = nodes.nomination_cleanup;
@@ -1673,6 +1673,9 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
   ElapsedTimer timer;
   NominationTelemetry nomination_telemetry;
   x23::Defer record_nomination_stats([&] {
+    if (nomination_telemetry.retry) {
+      return;
+    }
     nomination_telemetry.duration = timer.elapsed();
     record_metric_cleanup(
         [&] { record_nomination_attempt(nomination_telemetry); });
@@ -1704,19 +1707,39 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
         SchedulerProposalOutcome::SchedulerProposalError);
   }
   if (nominated_block_cache_.block_id) {
-    // A block was nominated by this node and not yet committed or abandoned.
-    // [schedulercoord_commit_block()] needs to be called before this node can
-    // nominate another block.
-    debug("schedulercoord_nominate ret");
-    co_return SchedulerProposalResult(
-        SchedulerProposalOutcome::SchedulerProposalError);
+    // A retry of the identical request (same parent, proposer and timepoint)
+    // gets the block this node already nominated, so a lost reply does not
+    // wedge a node that has no other validator to abandon the nomination.
+    // Anything else, including a reply not fully built, keeps the old answer
+    // until a commit clears the nomination. The proposer matters because peers
+    // fetch missing block data from it; the timepoint because a caller asking
+    // for a new time must not get a block executed at another.
+    const SchedulerProposalResult &cached =
+        nominated_block_cache_.proposal_result;
+    if (cached.outcome() != SchedulerProposalOutcome::SchedulerProposalOK ||
+        cached.proposed_block().block_id != nominated_block_cache_.block_id ||
+        nominated_block_cache_.db_tip.id != nominated_block_cache_.block_id ||
+        cached.proposed_block().proposal.header.proposer != context.proposer ||
+        cached.proposed_block().proposal.header.block_timepoint !=
+            context.block_timepoint) {
+      debug("schedulercoord_nominate ret");
+      co_return SchedulerProposalResult(
+          SchedulerProposalOutcome::SchedulerProposalError);
+    }
+    // Visible in the log: a recovered lost reply looks like one of these, and
+    // a reply that can never be delivered repeats it every tick.
+    info("schedulercoord_propose_block returning pending block {} for parent "
+         "{} at timepoint {}",
+         nominated_block_cache_.block_id, parent_id, context.block_timepoint);
+    nomination_telemetry.retry = true;
+    co_return cached;
   }
 
   std::atomic<BlockID> proposal_block_id{0};
   x23::Dag nomination_dag("schedulercoord_nominate", default_threadpool());
   x23::DagCleanup cache_cleanup =
       nomination_dag.cleanup("clear proposal cache", [&]() -> x23::Async<void> {
-        nominated_block_cache_.block_id = 0;
+        nominated_block_cache_.clear_nomination();
         co_return;
       });
   x23::DagCleanup snapshot_cleanup = nomination_dag.cleanup(
@@ -2021,7 +2044,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
         co_await scheduler_guard(scheduler_->global_lock_);
         co_await scheduler_->abandon_pending_nomination(block_id);
       }
-      nominated_block_cache_.block_id = 0;
+      nominated_block_cache_.clear_nomination();
       co_return;
     };
 
@@ -3420,7 +3443,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         // elements in the vectors in [nominated_block_cache_], so if we clear
         // those vectors, we will experience segfaults because we will later
         // attempt to read/write indices that do not exist.
-        nominated_block_cache_.block_id = 0;
+        nominated_block_cache_.clear_nomination();
         validated_block_cache_.clear();
 
         co_await scheduler_->increment_current_block();

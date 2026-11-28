@@ -1562,6 +1562,62 @@ TEST(Mempool, Propose)
   }
 }
 
+TEST(Mempool, ReproposeReturnsPendingBlock)
+{
+  MempoolTestInfra server;
+  auto &coord = server.mempool_coord_rpc();
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  coord.schedulercoord_submit_vetted({}, t_to_parallel_batch(txs)())();
+  const DbTip parent = coord.schedcoord_get_tip()().db_tip();
+  ProposalContext context{.block_timepoint =
+                              parent.value.proposal_header.block_timepoint + 1};
+  const auto first = propose_block(server, parent, context);
+  ASSERT_EQ(first.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  ASSERT_FALSE(first.proposed_block().txs.xdr.empty());
+
+  // The next event open must still be pending after all of the retries.
+  server.event_aggregator().fail_next_open_block();
+  EXPECT_EQ(propose_block(server, parent, context), first);
+  // Only the identical request is replayed: a new timepoint is rejected.
+  ProposalContext later = context;
+  ++later.block_timepoint;
+  EXPECT_EQ(coord.schedulercoord_propose_block(parent.id, later)().outcome(),
+            SchedulerProposalOutcome::SchedulerProposalError);
+  EXPECT_EQ(coord
+                .schedulercoord_propose_block(first.proposed_block().block_id,
+                                              context)()
+                .outcome(),
+            SchedulerProposalOutcome::SchedulerProposalError);
+  context.protocol = 1;
+  EXPECT_EQ(coord.schedulercoord_propose_block(parent.id, context)().outcome(),
+            SchedulerProposalOutcome::SchedulerProposalError);
+  context.protocol = 0;
+  // Peers fetch missing block data from the header's proposer, so a retry
+  // naming another proposer must not get this block.
+  ProposalContext other_proposer = context;
+  other_proposer.proposer[0] ^= 1;
+  ASSERT_NE(other_proposer.proposer, context.proposer);
+  EXPECT_EQ(
+      coord.schedulercoord_propose_block(parent.id, other_proposer)().outcome(),
+      SchedulerProposalOutcome::SchedulerProposalError);
+  const auto retry = propose_block(server, parent, context);
+  ASSERT_EQ(retry, first);
+  ASSERT_EQ(commit_block(server, parent, retry.proposed_block()),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+
+  const DbTip next_parent = coord.schedcoord_get_tip()().db_tip();
+  ASSERT_EQ(next_parent.id, first.proposed_block().block_id);
+  EXPECT_EQ(propose_block(server, next_parent, context).outcome(),
+            SchedulerProposalOutcome::SchedulerProposalError);
+  const auto fresh = propose_block(server, next_parent, context);
+  ASSERT_EQ(fresh.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  EXPECT_NE(fresh.proposed_block().block_id, first.proposed_block().block_id);
+  EXPECT_EQ(fresh.proposed_block().proposal.header.block_timepoint,
+            context.block_timepoint);
+  EXPECT_TRUE(fresh.proposed_block().txs.xdr.empty());
+}
+
 TEST(Mempool, NominateBatch)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -3587,6 +3643,10 @@ TEST(Mempool, RejectsABlockWhoseTimepointPrecedesTheTip)
                     ProposalContext{.block_timepoint = kTipTimepoint});
   ASSERT_EQ(equal_timepoint.outcome(),
             SchedulerProposalOutcome::SchedulerProposalOK);
+  EXPECT_EQ(propose_block(server, tip,
+                          ProposalContext{.block_timepoint = kTipTimepoint - 1})
+                .outcome(),
+            SchedulerProposalOutcome::SchedulerProposalError);
   // Commit the nomination.
   ASSERT_EQ(commit_block(server, tip, equal_timepoint.proposed_block()),
             SchedulerCommitOutcome::SchedulerCommitOK);
