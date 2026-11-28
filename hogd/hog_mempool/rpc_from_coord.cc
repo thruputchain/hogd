@@ -342,6 +342,47 @@ MempoolCoordinatorRpc::submit_unvetted_with_outcomes(
                                      /*malformed_is_protocol_error=*/true);
 }
 
+namespace {
+
+// Verifies [part] at [height] in one auth call over [client], writing its
+// results to [results] from index [start].
+x23::Async<void>
+verify_auth_rpc(auth_sched_client_t &client, BlockHeight height,
+                x23::span<const SignedTransaction> part,
+                AuthErrorCodeBatch &results, size_t start)
+{
+  const AuthErrorCodeBatch verified =
+      co_await client.authmempool_verify_transactions(height, part);
+  CHECK_EQ(verified.size(), part.size());
+  std::ranges::copy(verified, results.begin() + start);
+}
+
+} // namespace
+
+x23::Async<AuthErrorCodeBatch>
+MempoolCoordinatorRpc::verify_in_auth_rpcs(BlockHeight height,
+                                           const SignedTransactionBatch &txs)
+{
+  AuthErrorCodeBatch results;
+  results.resize(txs.size(), AuthErrorCode::kAuthSuccess);
+  const size_t rpcs = (txs.size() + kAuthRpcTxs - 1) / kAuthRpcTxs;
+  std::vector<x23::Async<void>> calls;
+  calls.reserve(rpcs);
+  for (size_t r = 0; r < rpcs; r++) {
+    const size_t start = r * kAuthRpcTxs;
+    const size_t end = std::min(start + kAuthRpcTxs, txs.size());
+    calls.push_back(
+        verify_auth_rpc(*auth_clients_[r % auth_clients_.size()], height,
+                        x23::span<const SignedTransaction>(txs.data() + start,
+                                                           end - start),
+                        results, start));
+  }
+  for (x23::Async<void> &call : calls) {
+    co_await call;
+  }
+  co_return results;
+}
+
 x23::Async<AuthErrorCodeBatch>
 MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
                                          InstrumentedCoroGuard &commit_guard)
@@ -410,8 +451,7 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
       MempoolMetrics::instance().ingestion_auth_retry_count.increment();
     repeated_auth = true;
     const AuthErrorCodeBatch verified =
-        co_await auth_client_->authmempool_verify_transactions(verify_height,
-                                                               retry_txs);
+        co_await verify_in_auth_rpcs(verify_height, retry_txs);
     MempoolMetrics::instance().ingestion_auth_rpc_seconds.record(
         auth_timer.elapsed());
     if (submission_auth_test_hook_) {
@@ -1956,8 +1996,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
 
   co_await wait_for_auth_data(/*expected_height=*/0);
 
-  AuthErrorCodeBatch auth_results =
-      co_await auth_client_->authmempool_verify_transactions(0, txs);
+  AuthErrorCodeBatch auth_results = co_await verify_in_auth_rpcs(0, txs);
   if (auth_results.size() != txs.size() ||
       std::ranges::any_of(auth_results, [](AuthErrorCode auth_result) {
         return auth_result != AuthErrorCode::kAuthSuccess;
@@ -3580,8 +3619,7 @@ MempoolCoordinatorRpc::auth_data_changed(
     txs += change_txs;
   }
   AuthErrorCodeBatch auth_ret =
-      co_await auth_client_->authmempool_verify_transactions(
-          scheduler_->current_block(), txs);
+      co_await verify_in_auth_rpcs(scheduler_->current_block(), txs);
   CHECK_EQ(auth_ret.size(), tx_hashes.size());
   x23::Vec<TransactionHash> to_remove;
   for (size_t i = 0; i < auth_ret.size(); i++) {
